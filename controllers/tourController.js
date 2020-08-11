@@ -10,7 +10,6 @@ exports.aliasTopTours = async (req, res, next) => {
 
 exports.getAllTours = async (req, res) => {
   try {
-
     // EXECUTE QUERY
     const features = new APIFeatures(Tour.find(), req.query)
       .filter()
@@ -107,3 +106,128 @@ exports.deleteTour = async (req, res) => {
     });
   }
 };
+
+
+/*
+
+  Get Tour stats utilizes the MongoDB Aggregation Pipeline
+
+*/
+exports.getTourStats = async (req, res) => {
+  try {
+    const stats = await Tour.aggregate([
+      {
+        $match: { ratingsAverage: { $gte: 4.5 } }
+      },
+      {
+        $group: {
+          _id: { $toUpper: '$difficulty'},
+          numTours: { $sum: 1 },
+          numRatings: { $sum: '$ratingsQuantity' },
+          avgRating: { $avg: '$ratingsAverage' },
+          avgPrice: { $avg: '$price' },
+          minPrice: { $min: '$price' },
+          maxPrice: { $max: '$price' },
+        }
+      },
+      /*{
+        $sort: { 
+          avgPrice: 1
+        }
+      },
+      {
+        $match: { 
+          _id: {$ne: 'EASY'}
+        }
+      }*/
+    ]);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        stats
+      }
+    });
+
+
+  } catch (err) {
+    res.status(400).json({
+      status: 'success',
+      data: err
+    });
+  }
+}
+
+
+/* 
+  Unwinding & Projecting
+
+  The '$unwind' operator can take a 'document' which has a field that contains an array and separates them into diff documents
+  For example:
+  'The Forest Hiker' tour with 3 starting dates can be unwinded so that it can have a different 'document' for each starting date
+  
+  The '$project' operator takes our document and hides a specified '$field' 0 = hide, 1 = show
+  Example: 
+
+  $project: {
+    _id: 0
+  }
+
+*/
+exports.getMonthlyPlan = async (req, res) => {
+  try {
+
+    const year = req.params.year * 1; // Multiply by 1 to easily convert into a number
+
+    const plan = await Tour.aggregate([
+      {
+        $unwind: '$startDates' //Reference explanation above
+      },
+      {
+        $match: { 
+          startDates: { 
+            $gte: new Date(`${year}-01-01`), //between first day of ${year}
+            $lte: new Date(`${year}-12-31`) //between last day of ${year}
+          }
+         }
+      },
+      {
+        $group: { 
+          _id: { $month: '$startDates' },
+          numTourStarts: { $sum: 1 },
+          tours: { $push: '$name' } //$push creates an array using the specified field
+        }
+      },
+      {
+        $sort: { 
+          _id: 1
+        }
+      },
+      {
+        $addFields: { month: '$_id' }
+      },
+      {
+        $project: { 
+          _id: 0
+        }
+      },
+      {
+        $limit: 12
+      }
+
+    ]);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        plan
+      }
+    });
+
+  } catch (err) {
+    res.status(400).json({
+      status: 'success',
+      data: err
+    });
+  }
+}
